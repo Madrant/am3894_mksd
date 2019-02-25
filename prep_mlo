@@ -1,0 +1,68 @@
+#!/bin/bash
+
+set -e
+
+# $1 - u-boot.bin
+# $2 - MLO output path
+
+# Configure script paths:
+SCRIPT_DIR="$(dirname $(readlink -f $0))"
+TOP_DIR="$(dirname $(readlink -f $SCRIPT_DIR))"
+PWD_DIR=`pwd`
+
+if [[ -z $1 ]]
+then
+    UBOOT=$TOP_DIR/u-boot/u-boot.bin
+    echo "Using default u-boot.bin location: $UBOOT"
+else
+    UBOOT=$1
+fi
+
+if [[ -z $2 ]]
+then
+    MLO=$PWD_DIR/MLO
+    echo "MLO save path: $MLO"
+else
+    UBOOT=$2
+fi
+
+if ! [[ -e $UBOOT ]]
+then
+	echo "Incorrect u-boot.bin location!"
+	exit
+fi
+
+
+SIZE=`wc -c $UBOOT | awk '{print $1}'`
+LOADADDR=40400000
+
+echo "$UBOOT filesize is $SIZE bytes"
+
+SIZE_HEX=`printf '%08x' $SIZE`
+
+echo "Load address: $LOADADDR"
+echo "Filesize:     $SIZE_HEX"
+
+echo "Target CPU is Little-Endian:"
+
+#Convert BE value to LE
+LOADADDR=`echo ${LOADADDR:6:2}${LOADADDR:4:2}${LOADADDR:2:2}${LOADADDR:0:2}`
+SIZE_HEX=`echo ${SIZE_HEX:6:2}${SIZE_HEX:4:2}${SIZE_HEX:2:2}${SIZE_HEX:0:2}`
+
+echo "Load address: $LOADADDR"
+echo "Filesize:     $SIZE_HEX"
+
+echo "Making MLO header:"
+
+LOADADDR=`echo \\\x${LOADADDR:0:2}\\\x${LOADADDR:2:2}\\\x${LOADADDR:4:2}\\\x${LOADADDR:6:2}`
+SIZE_HEX=`echo \\\x${SIZE_HEX:0:2}\\\x${SIZE_HEX:2:2}\\\x${SIZE_HEX:4:2}\\\x${SIZE_HEX:6:2}`
+
+echo -en "${SIZE_HEX}" > $MLO
+echo -en "${LOADADDR}" >> $MLO
+cat $MLO | hexdump -vC
+
+echo "Copying $UBOOT body"
+cat $UBOOT >> $MLO
+
+echo "MLO build done"
+ls -l $MLO

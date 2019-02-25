@@ -1,0 +1,156 @@
+#!/bin/bash
+
+set -e
+
+MD5SUMS_FILE=md5sums
+MD5SUMS_BIN_FILE=md5sums.bin
+MD5SUMS_TXT_FILE=md5sums.txt
+MD5SUMS_BIN_FILE_SIZE=$((0x800))
+TMP_FILE=.tmp
+
+# md5sums.bin structure:
+#
+# text field   [16 bytes]
+# overall MD5  [16 bytes]
+
+# text field   [16 bytes]
+# u-boot MD5   [16 bytes]
+
+# text field   [16 bytes]
+# uImage MD5   [16 bytes]
+
+# text field   [16 bytes]
+# uramdisk MD5 [16 bytes]
+
+SCRIPT_DIR="$(dirname $(readlink -f $0))"
+TOP_DIR="$(dirname $(readlink -f $SCRIPT_DIR))"
+
+# Command line parameters:
+#
+# $1=u-boot.bin
+# $2=uImage
+# $3=uramdisk
+
+UBOOT=$TOP_DIR/u-boot/u-boot.bin
+UIMAGE=$TOP_DIR/kernel/uImage
+URAMDISK=$TOP_DIR/rootfs/uramdisk
+
+check_cmd() {
+    if ! type $1 1>/dev/null 2>/dev/null
+    then
+       echo "Error: Command '$1' not found - please install '$1' and try again"
+       exit 1
+    fi
+}
+
+# Check for required commands
+check_cmd xxd
+check_cmd dd
+check_cmd awk
+check_cmd wc
+check_cmd printf
+check_cmd hexdump
+
+# Check for required params
+if [[ -z $1 ]]
+then
+    echo "Using default u-boot.bin location: $UBOOT"
+else
+    UBOOT=$1
+fi
+
+if [[ -z $2 ]]
+then
+    echo "Using default uImage location:     $UIMAGE"
+else
+    UIMAGE=$2
+fi
+
+if [[ -z $3 ]]
+then
+    echo "Using default uramdisk location:   $URAMDISK"
+else
+    URAMDISK=$3
+fi
+
+# Check for files
+if ! [[ -e $UBOOT ]]
+then
+    echo "Incorrect u-boot.bin location: $UBOOT"
+    exit
+fi
+
+if ! [[ -e $UIMAGE ]]
+then
+    echo "Incorrect uImage location:     $UIMAGE"
+    exit
+fi
+
+if ! [[ -e $URAMDISK ]]
+then
+    echo "Incorrect URAMDISK location:   $URAMDISK"
+    exit
+fi
+
+# Get file names
+UBOOT_FNAME=`basename $UBOOT`
+UIMAGE_FNAME=`basename $UIMAGE`
+URAMDISK_FNAME=`basename $URAMDISK`
+
+# Calculate md5
+UBOOT_MD5=`cat $UBOOT | md5sum | awk '{print $1}'`
+UIMAGE_MD5=`cat $UIMAGE | md5sum | awk '{print $1}'`
+URAMDISK_MD5=`cat $URAMDISK | md5sum | awk '{print $1}'`
+
+# Generate overall firmware MD5
+echo "" > $TMP_FILE
+
+echo -en $UBOOT_MD5    | xxd -r -p | dd of=$TMP_FILE bs=1 seek=0  conv=notrunc 1>/dev/null 2>/dev/null
+echo -en $UIMAGE_MD5   | xxd -r -p | dd of=$TMP_FILE bs=1 seek=16 conv=notrunc 1>/dev/null 2>/dev/null
+echo -en $URAMDISK_MD5 | xxd -r -p | dd of=$TMP_FILE bs=1 seek=32 conv=notrunc 1>/dev/null 2>/dev/null
+
+FW_MD5=`cat $TMP_FILE | md5sum | awk '{print $1}'`
+
+rm -f $TMP_FILE
+
+# Show MD5 sums
+echo
+echo "MD5 sums:"
+printf '  %s \t %s \n'   "Overall"        $FW_MD5
+printf '  %s \t %s \n'   $UBOOT_FNAME     $UBOOT_MD5
+printf '  %s   \t %s \n' $UIMAGE_FNAME    $UIMAGE_MD5
+printf '  %s \t %s \n'   $URAMDISK_FNAME  $URAMDISK_MD5
+
+# Create md5sums.bin
+dd if=/dev/zero of=$MD5SUMS_BIN_FILE bs=1 count=$MD5SUMS_BIN_FILE_SIZE 1>/dev/null 2>/dev/null
+
+# Fill md5sums.bin
+echo -en "Firmware MD5"  | dd of=$MD5SUMS_BIN_FILE bs=1 conv=notrunc seek=0  1>/dev/null 2>/dev/null
+echo -en $FW_MD5         | xxd -r -p | dd of=$MD5SUMS_BIN_FILE bs=1  seek=16 conv=notrunc 1>/dev/null 2>/dev/null
+
+echo -en $UBOOT_FNAME    | dd of=$MD5SUMS_BIN_FILE bs=1 conv=notrunc seek=32 1>/dev/null 2>/dev/null
+echo -en $UBOOT_MD5      | xxd -r -p | dd of=$MD5SUMS_BIN_FILE bs=1  seek=48 conv=notrunc 1>/dev/null 2>/dev/null
+
+echo -en $UIMAGE_FNAME   | dd of=$MD5SUMS_BIN_FILE bs=1 conv=notrunc seek=64 1>/dev/null 2>/dev/null
+echo -en $UIMAGE_MD5     | xxd -r -p | dd of=$MD5SUMS_BIN_FILE bs=1  seek=80 conv=notrunc 1>/dev/null 2>/dev/null
+
+echo -en $URAMDISK_FNAME | dd of=$MD5SUMS_BIN_FILE bs=1 conv=notrunc seek=96 1>/dev/null 2>/dev/null
+echo -en $URAMDISK_MD5   | xxd -r -p | dd of=$MD5SUMS_BIN_FILE bs=1  seek=112 conv=notrunc 1>/dev/null 2>/dev/null
+
+# Save MD5 sums to text file
+echo "Firmware MD5 sums:" > $MD5SUMS_TXT_FILE
+echo
+printf '  %s \t %s\n' "Overall MD5"     $FW_MD5        >> $MD5SUMS_TXT_FILE
+printf '  %s \t %s\n' $UBOOT_FNAME      $UBOOT_MD5     >> $MD5SUMS_TXT_FILE
+printf '  %s \t %s\n' $UIMAGE_FNAME     $UIMAGE_MD5    >> $MD5SUMS_TXT_FILE
+printf '  %s \t %s\n' $URAMDISK_FNAME   $URAMDISK_MD5  >> $MD5SUMS_TXT_FILE
+
+# Get md5 file size
+MD5SUMS_FILE_SIZE=`cat $MD5SUMS_BIN_FILE | wc -c`
+
+# Done
+echo
+echo "Done generating $MD5SUMS_BIN_FILE ($MD5SUMS_BIN_FILE_SIZE bytes):"
+dd if=$MD5SUMS_BIN_FILE bs=1 count=128 2>/dev/null | hexdump -vC
+
+exit 0
